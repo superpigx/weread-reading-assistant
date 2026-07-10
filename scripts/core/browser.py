@@ -22,7 +22,10 @@ EDGE_PATHS = [
     r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
 ]
 # 用 WereadCDP2 避开之前混乱的旧 WereadCDP 目录（该目录曾扁平铺平导致结构损坏、启动退出码 21）
-DEFAULT_PROFILE = r"C:\Users\Administrator\AppData\Local\Google\Chrome\WereadCDP2"
+# 可移植：默认跟随当前用户的 LOCALAPPDATA，不硬编码本机用户名。
+DEFAULT_PROFILE = os.path.join(
+    os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
+    "Google", "Chrome", "WereadCDP2")
 
 # 默认有头模式，不传 --headless；仅在 HEADLESS=1 时由 launch_and_connect 追加 --headless=new。
 PW_ARGS = ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]

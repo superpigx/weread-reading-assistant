@@ -5,7 +5,9 @@ from common import log
 from core.browser import seed_profile, DEFAULT_PROFILE
 
 def run(args):
-    src = args.src or r"C:\Users\Administrator\AppData\Local\Google\Chrome\User Data\Default"
+    src = args.src or os.path.join(
+        os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
+        "Google", "Chrome", "User Data", "Default")
     dst = args.dst or os.environ.get("WEREAD_PROFILE") or DEFAULT_PROFILE
     log("复制登录态 profile: %s -> %s" % (src, dst))
     log("⚠️ 请先关闭你自己的 Chrome（否则 profile 被锁会导致复制不完整），复制完成后即可重开。")

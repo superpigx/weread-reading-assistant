@@ -1,0 +1,3 @@
+# 运行依赖（已装在 WorkBuddy 隔离 venv：.../python/envs/default）
+# 如需重装：该 venv 的 python -m pip install -r requirements.txt
+playwright>=1.40

@@ -43,14 +43,14 @@ def parse():
     pe.add_argument("--v", help="reader 页 bookId")
     pe.add_argument("--self-title", help="本书标题，用于排除自身")
     pe.add_argument("--out-dir", default=os.getcwd())
-    pe.add_argument("--rounds", type=int, default=12, help="滚动收集轮数上限")
+    pe.add_argument("--rounds", type=int, default=200, help="翻页遍历全书上限")
 
     pexp = sub.add_parser("expand", help="扩展阅读：提取提及的书并生成带链接的清单（不加书架）")
     pexp.add_argument("--reader-url", help="微信读书阅读页 URL（web/reader/<v>）")
     pexp.add_argument("--v", help="reader 页 bookId")
     pexp.add_argument("--self-title", help="本书标题，用于排除自身")
     pexp.add_argument("--out-dir", default=os.getcwd())
-    pexp.add_argument("--rounds", type=int, default=12, help="滚动收集轮数上限")
+    pexp.add_argument("--rounds", type=int, default=200, help="翻页遍历全书上限")
 
     ps = sub.add_parser("shelf", help="批量加书架")
     ps.add_argument("--books-file", help="书名列表（每行一本，无书名号）")

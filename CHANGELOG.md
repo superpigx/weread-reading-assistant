@@ -10,6 +10,48 @@
 
 ---
 
+## [1.2.1] - 2026-07-11
+
+### Changed
+- **extract 改用全书搜索 API（server-side search），彻底摒弃翻页/DOM 扫描**：
+  `GET /web/book/search?bookId=<数字>&keyword=《` 是微信读书阅读器"查询"功能的后端接口。
+  服务器全量返回搜索结果，正则从 abstract 片段提取《书名》即可。无需翻页、无需拦截章节接口、零反爬风险。
+- 新增 `_get_bookid()` 从页面自动提取数字 bookId（performance 资源 URL 或 YueWen_ 前缀）。
+- `--rounds` 默认 200，收敛阈值 12（保留兼容，搜索方案不依赖翻页）。
+- **废弃** 1.2.0 的章节接口拦截方案（headless 无法触发章节加载）。
+
+### Fixed
+- 解决数字 bookId 不在 reader URL 中的提取瓶颈。
+
+---
+
+## [1.2.0] - 2026-07-11（已废弃，被 1.2.1 取代）
+
+### Fixed
+- **extract 提取全书提及书的根本方案修正**：经完整排查，旧版（含 1.1.0 的 DOM 方案）读 `document.body.innerText` 或 `.readerChapterContent` 都拿不到正文——微信读书阅读器对正文做了**虚拟化 + 懒加载**，正文《书名》根本不进 DOM（headless/无真实渲染下 `.readerChapterContent` 恒为简介+第一章开头，翻页/滚动/点目录都不加载新章）。
+- 改为**拦截阅读器原生章节接口 `web/book/chapter/e_N` 的回包**来取全本正文：打开阅读页 → 挂响应监听器 → `PageDown` 正常翻页（等同正常阅读，非爬虫）→ 每章把 base64 编码的 XHTML/正文解码、剥标签 → 正则提取《…》去重 → 排除本书。这是阅读器自己加载正文用的数据通道，安全且能拿全本。
+- 新增 `common.decode_chapter_body()`：稳健解码回包（实测格式 `= [hex 哈希][可选分隔][base64(XHTML/正文)]`），自动识别 XHTML / 纯中文正文 / 样式章节，多偏移试解选取合理结果，最后剥标签/实体。
+
+### Changed
+- `collect_mentioned` 重写：响应拦截 + `PageDown` 翻页遍历，连续 5 页无新章节即判定遍历完成；无 `page` 对象时降级读 DOM 首屏。
+- `extract` / `expand` 共用新逻辑；`BOOK_RE` 与 `extract_books` / `read_reader_text` 保留为清洗层。
+
+### Known Limitations
+- **提取依赖真实渲染**：章节是按需懒加载，headless / 无真实渲染的环境里阅读器只预载少量章节、翻页不触发加载，故 extract 在**无头/沙箱环境只能拿到少量章节（可能 0 本）**。**请在本机 headed 模式（真实阅读、随翻页加载各章）下运行 extract** 才能拿全本——这是平台虚拟化限制，非代码缺陷。
+- 章节接口 `c` 签名与章节绑定，且 `c` 哈希不在任何公开接口下发，故无法离线重放全部章节（会触发反爬 500）；坚持走阅读器原生加载通道。
+
+---
+
+## [1.1.0] - 2026-07-11（已废弃，被 1.2.0 取代）
+
+> 该版本尝试用 DOM（`.readerChapterContent` + `Space` 翻页）提取，但后续排查证实微信读书正文不进 DOM，方案不成立，已由 1.2.0 的章节接口拦截方案取代。
+
+### Changed（当时尝试，现已弃用）
+- 读取 `.readerChapterContent.textContent` + `Space` 翻页遍历全书。
+- 新增 `extract_books` / `read_reader_text` / 收紧 `BOOK_RE`。
+
+---
+
 ## [1.0.0] - 2026-07-11
 
 当前稳定基线。由早期 `weread-extract-mentioned`（提取提及书）与 `weread-add-to-shelf`（批量加书架）两个 skill 合并而来，统一为单一入口、共享引擎。

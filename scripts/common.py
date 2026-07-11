@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """微信读书扩展阅读助手 — 共享工具：日志、中文判定、版本优选、JS 片段、等待常量。"""
-import datetime, re, time
+import datetime, re, time, base64, json
 
 # 这些常量现在作为「兜底超时上限」：页面元素一旦渲染完成（wait_selector/wait_fn）
 # 会立即继续，不再死等满。真实网络下通常 1~3 秒就走完，远小于以下上限。
@@ -45,7 +45,110 @@ def pick(cands, name):
     matched.sort(key=lambda c: (-c["rec"], len(c["t"])))
     return matched[0]
 
-BOOK_RE = re.compile(r"\u300a([^\u300b]+)\u300b")  # 匹配《...》
+BOOK_RE = re.compile(r"\u300a([^\u300a\u300b\n]{1,40})\u300b")  # 匹配《...》，排除嵌套书名号与超长（跨页截断）
+
+
+def extract_books(txt, self_title=""):
+    """从正文文本提取《...》书名。清洗规则：去掉跨页截断噪声（含 .. ）、
+    仍含书名号的嵌套脏数据、过短（<2字）、以及本书自身标题。返回列表（不去重，调用方去重）。"""
+    out = []
+    if not txt:
+        return out
+    for m in BOOK_RE.findall(txt):
+        t = m.strip()
+        if not t:
+            continue
+        if ".." in t or "..." in t:        # 跨页截断噪声，如「世界上最伟..」
+            continue
+        if "\u300a" in t or "\u300b" in t:  # 仍有书名号（嵌套），丢弃
+            continue
+        if len(t) < 2:
+            continue
+        if self_title and t == self_title:
+            continue
+        out.append(t)
+    return out
+
+
+def read_reader_text(cdp):
+    """读取微信读书阅读器正文全文：优先 .readerChapterContent 真实正文容器，
+    缺失（极少数书用不同结构）时回退 document.body.textContent。返回字符串。"""
+    txt = cdp.evaluate("(function(){var el=document.querySelector('.readerChapterContent');return el?el.textContent:'';})()")
+    if isinstance(txt, str) and len(txt.strip()) > 50:
+        return txt
+    body = cdp.evaluate("(function(){return document.body?document.body.textContent:'';})()")
+    return body if isinstance(body, str) else ""
+
+
+def _is_sane_text(txt):
+    """判断解码后的文本是否为有效章节内容（XML/CSS/中文正文）。"""
+    t = txt.strip()
+    if t.startswith("<?xml") or t.startswith("<"):
+        return True
+    if re.search(r"<[a-zA-Z!]", t[:60]):
+        return True
+    if "width" in t[:60] or "body{" in t[:60] or ".class" in t[:60] or t[:1] == "{":
+        return True
+    head = t[:200]
+    if head:
+        cjk = sum(1 for c in head if "\u4e00" <= c <= "\u9fff")
+        if cjk / len(head) > 0.2:
+            return True
+    return False
+
+
+def decode_chapter_body(raw):
+    """解码 web/book/chapter/e_N 的回包正文 -> 清理后的纯文本。
+
+    微信读书章节接口回包格式（已实测）：
+      可选 JSON 包裹 -> 否则为 [hex哈希串][base64编码的 XHTML 或 正文]。
+    hex 哈希长度不固定，其后紧跟 base64；base64 解码后或以 <?xml 开头（XHTML 章节），
+    或为纯中文正文，或为 CSS（样式章节）。采用「去 hex 前缀 + 多偏移试解」策略，
+    选取解码后内容合理的那一份，最后剥标签/实体。
+    """
+    if not raw:
+        return ""
+    s = raw.strip()
+    # 1) 已是文本（极少数情况）
+    if s.startswith("<?xml") or s.lstrip().startswith("<"):
+        return _strip_tags(s)
+    # 2) JSON 包裹：取其中的字符串字段再递归
+    try:
+        j = json.loads(s)
+        if isinstance(j, dict):
+            for k in ("p", "content", "data", "text", "body", "html"):
+                if isinstance(j.get(k), str):
+                    return decode_chapter_body(j[k])
+    except Exception:
+        pass
+    # 3) 去 hex 前缀，然后多偏移试解 base64
+    m = re.match(r"^[0-9A-Fa-f]+", s)
+    start = m.end() if m else 0
+    cand = s[start:]
+    best = None
+    for off in range(0, 4):
+        sub = cand[off:]
+        if len(sub) < 8:
+            continue
+        try:
+            raw_b = base64.b64decode(sub)
+            txt = raw_b.decode("utf-8", "ignore")
+        except Exception:
+            continue
+        if _is_sane_text(txt):
+            best = txt
+            break
+    if best is None:
+        best = cand  # 兜底：返回原串（下次正则自然无匹配）
+    return _strip_tags(best)
+
+
+def _strip_tags(txt):
+    txt = re.sub(r"<[^>]+>", " ", txt)
+    txt = re.sub(r"&[a-zA-Z#0-9]+;", " ", txt)
+    txt = re.sub(r"\s+", " ", txt)
+    return txt.strip()
+
 
 # ---- 加书架相关 JS ----
 JS_SEARCH = r"""(function(){

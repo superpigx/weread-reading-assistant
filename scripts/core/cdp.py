@@ -46,9 +46,16 @@ class CDP:
             return False
 
     def wait_fn(self, expr, timeout=10, arg=None):
-        """等价 Playwright page.wait_for_function，JS 条件成立即返回 True。"""
+        """等价 Playwright page.wait_for_function，JS 条件成立即返回 True。
+
+        注意：Playwright 的 wait_for_function 把箭头函数/函数声明字符串当「表达式」求值，
+        会得到函数对象（永远 truthy）而不执行——导致条件永远立即成立（假阳性）。
+        因此若 expr 是函数形式，这里自动包成 IIFE `(expr)()` 真正执行其返回值。"""
+        e = (expr or "").strip()
+        if e.startswith("() =>") or e.startswith("function"):
+            e = "(" + e + ")()"
         try:
-            self.page.wait_for_function(expr, arg=arg, timeout=timeout * 1000)
+            self.page.wait_for_function(e, arg=arg, timeout=timeout * 1000)
             return True
         except Exception:
             return False

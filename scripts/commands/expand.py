@@ -16,9 +16,9 @@ def run(args, cdp):
     os.makedirs(out_dir, exist_ok=True)
     logfile = os.path.join(out_dir, "expand_log.txt")
     self_title = (args.self_title or "").strip()
-    rounds = args.rounds or 12
+    max_pages = args.rounds or 300  # rounds 复用作最大翻页数
 
-    books = collect_mentioned(cdp, url, self_title, rounds, logfile)
+    books = collect_mentioned(cdp, url, self_title, max_pages, logfile)
 
     # 仍产出 books.txt（方便后续 shelf 一条龙），但本命令不自动加书架
     books_file = os.path.join(out_dir, "books.txt")
@@ -39,7 +39,7 @@ def run(args, cdp):
             link = "https://weread.qq.com/web/search/books?keyword=" + q
             lines.append("| %d | 《%s》 | [搜索](%s) |" % (i, b, link))
     else:
-        lines.append("_未提取到提及的书（可增大 --rounds，或确认该书目录栏可搜《）_")
+        lines.append("_未提取到提及的书（可增大 --rounds 翻页数，或确认该书正文含《书名》引用）_")
     lines.append("")
     lines.append("---")
     lines.append("生成时间见日志。如需把以上书加入书架，运行：")

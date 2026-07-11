@@ -1,49 +1,87 @@
 # -*- coding: utf-8 -*-
-"""提取微信读书某本书正文中《》提及的其他书籍。"""
-import os, json, time
-from common import log, BOOK_RE, JS_OPEN_SEARCH, JS_READ_RESULTS, JS_SCROLL, open_logged_in
+"""提取微信读书某本书正文中《》提及的其他书籍。
+v1.2.1: 改用全书搜索 API（server-side search），安全可靠，不翻页不爬虫。"""
+import os, json, time, urllib.parse
+from common import log, extract_books, read_reader_text, open_logged_in
+
+SEARCH_API = "https://weread.qq.com/web/book/search"
+SEARCH_COUNT = 20  # 每页搜索结果数
 
 
-def collect_mentioned(cdp, url, self_title, rounds, logfile):
-    """打开阅读页 -> 目录栏搜《 -> 多轮滚动收集 -> 正则提取《…》去重 -> 排除本书。
-    返回去重后的书名列表。extract 与 expand 共用此逻辑，避免重复维护。"""
-    log("打开阅读页: %s" % url, logfile)
-    open_logged_in(cdp, url, 8, login_timeout=180)  # 含未登录等待扫码
-    res = cdp.evaluate(JS_OPEN_SEARCH)
-    log("打开目录检索框: %s" % res, logfile)
-    time.sleep(3)
+def _get_bookid(cdp):
+    """从阅读页提取数字 bookId（如 910364）。
+    优先从已加载的资源 URL 中匹配 bookId= 模式；其次从封面图片 URL（YueWen_ 前缀）提取。"""
+    bid = cdp.evaluate("""(function(){
+        // 1) 从 performance 资源 URL 找 bookId=<digits>
+        var entries = performance.getEntriesByType('resource');
+        for (var i = 0; i < entries.length; i++) {
+            var m = entries[i].name.match(/bookId[=:](\\d{5,8})/);
+            if (m) return m[1];
+        }
+        // 2) 从封面图片 src 中提取 YueWen_<digits>
+        var imgs = document.querySelectorAll('img[src*="YueWen_"]');
+        for (var j = 0; j < imgs.length; j++) {
+            var m2 = imgs[j].src.match(/YueWen_(\\d+)/);
+            if (m2) return m2[1];
+        }
+        return '';
+    })()""")
+    bid = (bid or "").strip()
+    return bid
 
-    seen = set()
-    books = []
-    no_new_streak = 0
-    for r_i in range(rounds):
-        r = cdp.evaluate(JS_READ_RESULTS)
-        txt = ""
-        if isinstance(r, str):
+
+def collect_mentioned(cdp, url, self_title, max_pages, logfile):
+    """用微信读书全书搜索 API 提取《书名》——服务器全量返回搜索结果，
+    不需要翻页扫 DOM，零反爬风险。extract 与 expand 共用此逻辑。
+
+    流程：打开阅读页（获取登录态 + bookId）-> 搜索《 关键词，逐页拉结果
+    -> 每页 abstract 正则提取《…》-> 去重 -> 排除本书。
+    """
+    log("打开阅读页准备提取提及书: %s" % url, logfile)
+    open_logged_in(cdp, url, 8, login_timeout=180)
+    cdp.wait_selector(".readerChapterContent", timeout=20)
+
+    book_id = _get_bookid(cdp)
+    if not book_id:
+        log("⚠️ 未能提取数字 bookId，降级读 DOM 首屏（结果可能不完整）", logfile)
+        return sorted(set(extract_books(read_reader_text(cdp), self_title)))
+    log("bookId=%s" % book_id, logfile)
+
+    all_abstracts = []
+    idx = 0
+    while True:
+        api_url = (SEARCH_API
+                   + "?bookId=%s&keyword=%%E3%%80%%8A" % book_id  # 《 URL 编码
+                   + "&maxIdx=%d&count=%d&fragmentSize=240&onlyCount=0" % (idx, SEARCH_COUNT))
+        page = getattr(cdp, "page", None)
+        if page is not None:
+            js = "(async()=>{const r=await fetch('%s');return await r.text();})()" % api_url
             try:
-                r = json.loads(r)
-            except Exception:
-                r = {}
-        if isinstance(r, dict):
-            txt = r.get("txt", "")
-        found = BOOK_RE.findall(txt or "")
-        new = 0
-        for t in found:
-            t2 = t.strip()
-            if t2 and t2 not in seen and t2 != self_title:
-                seen.add(t2)
-                books.append(t2)
-                new += 1
-        cdp.evaluate(JS_SCROLL)
-        time.sleep(2)
-        if new == 0:
-            no_new_streak += 1
-            if no_new_streak >= 2 and books:
-                log("连续 %d 轮无新增，判定到底，停止收集" % no_new_streak, logfile)
+                resp = page.evaluate(js)
+                data = json.loads(resp)
+            except Exception as e:
+                log("搜索API异常(idx=%d): %s" % (idx, e), logfile)
                 break
         else:
-            no_new_streak = 0
-    return books
+            log("⚠️ 无 page 对象，无法调用搜索 API", logfile)
+            break
+        results = data.get("result", [])
+        if not results:
+            break
+        for item in results:
+            abstract = item.get("abstract", "")
+            if abstract:
+                all_abstracts.append(abstract)
+        has_more = data.get("hasMore", 0)
+        log("搜索页 %d: %d 条结果, hasMore=%s" % (idx // SEARCH_COUNT, len(results), has_more), logfile)
+        if not has_more:
+            break
+        idx += SEARCH_COUNT
+
+    alltext = "\n".join(all_abstracts)
+    books = set(extract_books(alltext, self_title))
+    log("搜索 API 共提取 %d 本提及的书" % len(books), logfile)
+    return sorted(books)
 
 
 def run(args, cdp):
@@ -56,9 +94,9 @@ def run(args, cdp):
     os.makedirs(out_dir, exist_ok=True)
     logfile = os.path.join(out_dir, "extract_log.txt")
     self_title = (args.self_title or "").strip()
-    rounds = args.rounds or 12
+    max_pages = args.rounds or 200  # 保留兼容
 
-    books = collect_mentioned(cdp, url, self_title, rounds, logfile)
+    books = collect_mentioned(cdp, url, self_title, max_pages, logfile)
 
     books_file = os.path.join(out_dir, "books.txt")
     with open(books_file, "w", encoding="utf-8") as f:

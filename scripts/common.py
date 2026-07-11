@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
 """微信读书扩展阅读助手 — 共享工具：日志、中文判定、版本优选、JS 片段、等待常量。"""
-import datetime, re, time, base64, json
+import datetime, re, time, json, urllib.parse
 
 # 这些常量现在作为「兜底超时上限」：页面元素一旦渲染完成（wait_selector/wait_fn）
 # 会立即继续，不再死等满。真实网络下通常 1~3 秒就走完，远小于以下上限。
 SEARCH_WAIT = 8.0
 BOOK_WAIT = 12.0
 CLICK_WAIT = 5.0
-NAV_TIMEOUT = 60
 
 def log(msg, logfile=None):
     ts = datetime.datetime.now().strftime("%H:%M:%S")
@@ -19,6 +18,27 @@ def log(msg, logfile=None):
                 f.write(line + "\n")
         except Exception:
             pass
+
+def _safe_json_parse(raw, default=None):
+    """安全 JSON 解析：字符串→dict/list，失败返回 default。"""
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except Exception:
+            return default if default is not None else {}
+    return raw if isinstance(raw, (dict, list)) else (default if default is not None else {})
+
+def _search_candidates(cdp, name, retries=3, wait_sec=1.5):
+    """搜索图书候选列表（公共逻辑，shelf / recommend 共用）。
+    返回 candidates 列表，空列表表示未找到。"""
+    url = "https://weread.qq.com/web/search/books?keyword=" + urllib.parse.quote(name)
+    open_logged_in(cdp, url, 6, login_timeout=60)
+    for _ in range(retries):
+        cands = _safe_json_parse(cdp.evaluate(JS_SEARCH), [])
+        if cands:
+            return cands
+        time.sleep(wait_sec)
+    return []
 
 def has_cn(t):
     return any('\u4e00' <= c <= '\u9fff' for c in t)
@@ -80,76 +100,6 @@ def read_reader_text(cdp):
     return body if isinstance(body, str) else ""
 
 
-def _is_sane_text(txt):
-    """判断解码后的文本是否为有效章节内容（XML/CSS/中文正文）。"""
-    t = txt.strip()
-    if t.startswith("<?xml") or t.startswith("<"):
-        return True
-    if re.search(r"<[a-zA-Z!]", t[:60]):
-        return True
-    if "width" in t[:60] or "body{" in t[:60] or ".class" in t[:60] or t[:1] == "{":
-        return True
-    head = t[:200]
-    if head:
-        cjk = sum(1 for c in head if "\u4e00" <= c <= "\u9fff")
-        if cjk / len(head) > 0.2:
-            return True
-    return False
-
-
-def decode_chapter_body(raw):
-    """解码 web/book/chapter/e_N 的回包正文 -> 清理后的纯文本。
-
-    微信读书章节接口回包格式（已实测）：
-      可选 JSON 包裹 -> 否则为 [hex哈希串][base64编码的 XHTML 或 正文]。
-    hex 哈希长度不固定，其后紧跟 base64；base64 解码后或以 <?xml 开头（XHTML 章节），
-    或为纯中文正文，或为 CSS（样式章节）。采用「去 hex 前缀 + 多偏移试解」策略，
-    选取解码后内容合理的那一份，最后剥标签/实体。
-    """
-    if not raw:
-        return ""
-    s = raw.strip()
-    # 1) 已是文本（极少数情况）
-    if s.startswith("<?xml") or s.lstrip().startswith("<"):
-        return _strip_tags(s)
-    # 2) JSON 包裹：取其中的字符串字段再递归
-    try:
-        j = json.loads(s)
-        if isinstance(j, dict):
-            for k in ("p", "content", "data", "text", "body", "html"):
-                if isinstance(j.get(k), str):
-                    return decode_chapter_body(j[k])
-    except Exception:
-        pass
-    # 3) 去 hex 前缀，然后多偏移试解 base64
-    m = re.match(r"^[0-9A-Fa-f]+", s)
-    start = m.end() if m else 0
-    cand = s[start:]
-    best = None
-    for off in range(0, 4):
-        sub = cand[off:]
-        if len(sub) < 8:
-            continue
-        try:
-            raw_b = base64.b64decode(sub)
-            txt = raw_b.decode("utf-8", "ignore")
-        except Exception:
-            continue
-        if _is_sane_text(txt):
-            best = txt
-            break
-    if best is None:
-        best = cand  # 兜底：返回原串（下次正则自然无匹配）
-    return _strip_tags(best)
-
-
-def _strip_tags(txt):
-    txt = re.sub(r"<[^>]+>", " ", txt)
-    txt = re.sub(r"&[a-zA-Z#0-9]+;", " ", txt)
-    txt = re.sub(r"\s+", " ", txt)
-    return txt.strip()
-
-
 # ---- 加书架相关 JS ----
 JS_SEARCH = r"""(function(){
   var items=[].slice.call(document.querySelectorAll('.wr_bookList_item'));
@@ -189,33 +139,6 @@ JS_CLICK = r"""(function(){
   return JSON.stringify({clicked:true, tag:b.tagName});
 })();"""
 
-# ---- 提取提及书相关 JS ----
-JS_OPEN_SEARCH = r"""(function(){
-  var inp=document.querySelector('input[placeholder*="搜索"]');
-  if(!inp) return JSON.stringify({ok:false, reason:'no search input'});
-  inp.focus();
-  inp.value='《';
-  inp.dispatchEvent(new Event('input',{bubbles:true}));
-  inp.dispatchEvent(new KeyboardEvent('keydown',{key:'《',bubbles:true}));
-  return JSON.stringify({ok:true});
-})();"""
-
-JS_READ_RESULTS = r"""(function(){
-  var sel=['.readerCatalog_searchResult','.searchResult','.app_searchResult','.readerCatalog_item'];
-  var box=null;
-  for(var i=0;i<sel.length;i++){box=document.querySelector(sel[i]); if(box) break;}
-  var txt=box?box.innerText:document.body.innerText;
-  return JSON.stringify({len:(txt||'').length, txt:(txt||'').slice(0,20000)});
-})();"""
-
-JS_SCROLL = r"""(function(){
-  var sel=['.readerCatalog_searchResult','.searchResult','.app_searchResult','.readerCatalog_item'];
-  var box=null;
-  for(var i=0;i<sel.length;i++){box=document.querySelector(sel[i]); if(box) break;}
-  if(box){ box.scrollTop=box.scrollHeight; }
-  else { window.scrollBy(0,4000); }
-  return JSON.stringify({scrolled:!!box});
-})();"""
 
 def read_page(cdp):
     page = cdp.evaluate(JS_READ)
@@ -268,5 +191,3 @@ def open_logged_in(cdp, url, wait, login_timeout=180):
     else:
         time.sleep(min(wait, 2.0))
     return read_page(cdp)
-
-import json

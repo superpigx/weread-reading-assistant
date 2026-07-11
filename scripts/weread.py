@@ -4,6 +4,9 @@
 
 子命令（命令注册表 COMMANDS 分发，新增功能只需加模块 + 登记）：
   extract  提取书中提及的书 -> books.txt + weread_mentioned_books.md
+  pipeline 端到端全流程：提取 + 加书架（免手动）
+  expand   扩展阅读：生成带微信读书链接的清单（不加书架）
+  recommend 生成推荐书单精美 HTML 页面
   shelf    批量加书架（吃 books.txt 或直接给书名）
   search   搜索单本，返回候选（调试/独立用）
   verify   登录态预检
@@ -52,6 +55,18 @@ def parse():
     pexp.add_argument("--out-dir", default=os.getcwd())
     pexp.add_argument("--rounds", type=int, default=200, help="翻页遍历全书上限")
 
+    ppipe = sub.add_parser("pipeline", help="端到端全流程：提取 + 加书架（免手动）")
+    ppipe.add_argument("--reader-url", help="微信读书阅读页 URL")
+    ppipe.add_argument("--v", help="reader 页 bookId")
+    ppipe.add_argument("--self-title", help="本书标题，用于排除自身")
+    ppipe.add_argument("--out-dir", default=os.getcwd())
+
+    prec = sub.add_parser("recommend", help="生成推荐书单精美 HTML 页面")
+    prec.add_argument("--reader-url", help="微信读书阅读页 URL")
+    prec.add_argument("--v", help="reader 页 bookId")
+    prec.add_argument("--self-title", help="本书标题")
+    prec.add_argument("--out-dir", default=os.getcwd())
+
     ps = sub.add_parser("shelf", help="批量加书架")
     ps.add_argument("--books-file", help="书名列表（每行一本，无书名号）")
     ps.add_argument("--out-dir", default=os.getcwd())
@@ -79,14 +94,16 @@ def parse():
 
 # 命令注册表（扩展点）：name -> (module, func, needs_browser)
 COMMANDS = {
-    "extract": ("commands.extract", "run", True),
-    "expand":  ("commands.expand", "run", True),
-    "shelf":   ("commands.shelf", "run", True),
-    "search":  ("commands.search", "run", True),
-    "verify":  ("commands.verify", "run", True),
-    "login":   ("commands.login", "run", True),
-    "cleanup": ("commands.cleanup", "run", False),
-    "seed":    ("commands.seed", "run", False),
+    "extract":   ("commands.extract", "run", True),
+    "pipeline":  ("commands.pipeline", "run", True),
+    "expand":    ("commands.expand", "run", True),
+    "recommend": ("commands.recommend", "run", True),
+    "shelf":     ("commands.shelf", "run", True),
+    "search":    ("commands.search", "run", True),
+    "verify":    ("commands.verify", "run", True),
+    "login":     ("commands.login", "run", True),
+    "cleanup":   ("commands.cleanup", "run", False),
+    "seed":      ("commands.seed", "run", False),
 }
 
 def main():

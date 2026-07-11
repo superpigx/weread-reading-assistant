@@ -1,28 +1,13 @@
 # -*- coding: utf-8 -*-
 """批量把书加入微信读书书架：搜索 -> 优选中文版 -> 真实点击 -> 校验。"""
 import os, json, time, urllib.parse, datetime
-from common import (log, pick, JS_SEARCH, JS_READ, JS_CLICK,
-                    SEARCH_WAIT, BOOK_WAIT, CLICK_WAIT, read_page, open_logged_in)
+from common import (log, pick, JS_SEARCH, JS_READ, JS_CLICK, _search_candidates,
+                    SEARCH_WAIT, BOOK_WAIT, CLICK_WAIT, read_page, open_logged_in, _safe_json_parse)
 
-VERIFY_BOOK = "bcb32150719afe3bbcbad52"  # 掌控习惯，曾加架，用于登录态预检
-
-def search_candidates(cdp, name):
-    url = "https://weread.qq.com/web/search/books?keyword=" + urllib.parse.quote(name)
-    open_logged_in(cdp, url, SEARCH_WAIT, login_timeout=120)  # 含未登录等待扫码
-    for _ in range(3):
-        cands = cdp.evaluate(JS_SEARCH)
-        if isinstance(cands, str):
-            try:
-                cands = json.loads(cands)
-            except Exception:
-                cands = []
-        if isinstance(cands, list) and len(cands) > 0:
-            return cands
-        time.sleep(2.5)
-    return cands if isinstance(cands, list) else []
+VERIFY_BOOK = os.environ.get("WEREAD_VERIFY_BOOK", "bcb32150719afe3bbcbad52")  # 用于登录态预检，可通过环境变量覆盖
 
 def add_one(cdp, name, L):
-    cands = search_candidates(cdp, name)
+    cands = _search_candidates(cdp, name)
     if not isinstance(cands, list):
         L("    搜索解析异常"); cands = []
     pc = pick(cands, name)

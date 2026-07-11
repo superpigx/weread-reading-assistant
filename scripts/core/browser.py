@@ -14,12 +14,18 @@
 import os, shutil, time, atexit, subprocess
 
 CHROME_PATHS = [
-    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",       # Windows
+    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe", # Windows 32-bit
+    r"/usr/bin/google-chrome",        # Linux
+    r"/usr/bin/google-chrome-stable", # Linux (alt)
+    r"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", # macOS
 ]
 EDGE_PATHS = [
-    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe", # Windows
+    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",        # Windows alt
+    r"/usr/bin/microsoft-edge",        # Linux
+    r"/usr/bin/microsoft-edge-stable", # Linux (alt)
+    r"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge", # macOS
 ]
 # 用 WereadCDP2 避开之前混乱的旧 WereadCDP 目录（该目录曾扁平铺平导致结构损坏、启动退出码 21）
 # 可移植：默认跟随当前用户的 LOCALAPPDATA，不硬编码本机用户名。

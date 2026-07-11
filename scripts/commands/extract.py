@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """提取微信读书某本书正文中《》提及的其他书籍。
 v1.2.1: 改用全书搜索 API（server-side search），安全可靠，不翻页不爬虫。"""
-import os, json, time, urllib.parse
+import os, json, time
 from common import log, extract_books, read_reader_text, open_logged_in
 
 SEARCH_API = "https://weread.qq.com/web/book/search"
@@ -43,7 +43,8 @@ def collect_mentioned(cdp, url, self_title, max_pages, logfile):
 
     book_id = _get_bookid(cdp)
     if not book_id:
-        log("⚠️ 未能提取数字 bookId，降级读 DOM 首屏（结果可能不完整）", logfile)
+        log("⚠️ 未能提取数字 bookId，请确认 URL 为微信读书阅读页（web/reader/<books>）", logfile)
+        log("   可尝试：在浏览器打开该书 → 等页面加载完毕（含封面图） → 再运行 extract", logfile)
         return sorted(set(extract_books(read_reader_text(cdp), self_title)))
     log("bookId=%s" % book_id, logfile)
 
@@ -51,11 +52,11 @@ def collect_mentioned(cdp, url, self_title, max_pages, logfile):
     idx = 0
     while True:
         api_url = (SEARCH_API
-                   + "?bookId=%s&keyword=%%E3%%80%%8A" % book_id  # 《 URL 编码
-                   + "&maxIdx=%d&count=%d&fragmentSize=240&onlyCount=0" % (idx, SEARCH_COUNT))
+                   + "?bookId={}&keyword=%E3%80%8A"  # 《 已编码
+                   + "&maxIdx={}&count={}&fragmentSize=240&onlyCount=0").format(book_id, idx, SEARCH_COUNT)
         page = getattr(cdp, "page", None)
         if page is not None:
-            js = "(async()=>{const r=await fetch('%s');return await r.text();})()" % api_url
+            js = "(async()=>{const r=await fetch('" + api_url + "');return await r.text();})()"
             try:
                 resp = page.evaluate(js)
                 data = json.loads(resp)

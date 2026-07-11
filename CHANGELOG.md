@@ -10,6 +10,22 @@
 
 ---
 
+## [1.3.0] - 2026-07-11
+
+### Added
+- **`pipeline` 全流程管道命令**：提取 + 加书架端到端自动执行，免手动步骤。注册 `commands/pipeline.py`。
+- **`recommend` 推荐书单命令**：提取 → 逐本搜索微信读书获取详情（封面/作者/评分/读者数/简介）→ 生成自包含精美 HTML 页面。
+- `command-audit.md` 审计报告（10 命令无废弃项）。
+
+### Changed
+- `weread.py` COMMANDS 扩展：新增 pipeline / recommend 子命令。
+- VERSION → 1.3.0。SKILL.md 同步。
+
+### Fixed
+- 清理 `common.py` 死代码（-100行）、`extract.py` 无用导入、`weread-zhifu/` 50+调试脚本。
+
+---
+
 ## [1.2.1] - 2026-07-11
 
 ### Changed
